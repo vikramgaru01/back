@@ -53,10 +53,29 @@ app.use(
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+// Root endpoint with API information
+app.get("/", (req, res) => {
+  res.json({
+    message: "🚀 Web2Appify Express Backend API",
+    status: "Server is running",
+    platform: "Render",
+    version: "1.0.0",
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: "/api/health",
+      debug: "/api/debug",
+      testApk: "/api/test-apk",
+      downloadApk: "POST /api/download-apk",
+    },
+    description: "Backend service for APK processing and modification",
+    github: "https://github.com/Hemanthreddy747/web2appify-express-backend",
+  });
+});
+
 // APK download endpoint
 app.post("/api/download-apk", async (req, res) => {
   console.log("📱 APK download request received");
-  
+
   try {
     // Use whatever payload is received from frontend
     const newConfig = req.body;
@@ -69,24 +88,30 @@ app.post("/api/download-apk", async (req, res) => {
     // Check if original APK exists
     if (!fs.existsSync(originalApkPath)) {
       console.error("❌ Original APK file not found at:", originalApkPath);
-      
+
       // List what's actually in the uploads directory for debugging
       try {
         const uploadsDir = path.join(__dirname, "uploads");
-        const files = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
+        const files = fs.existsSync(uploadsDir)
+          ? fs.readdirSync(uploadsDir)
+          : [];
         console.log("📁 Files in uploads directory:", files);
       } catch (err) {
         console.error("❌ Error reading uploads directory:", err.message);
       }
-      
-      return res.status(404).json({ 
+
+      return res.status(404).json({
         error: "Original APK file not found",
         expectedPath: originalApkPath,
-        suggestion: "Make sure release.apk exists in the uploads directory"
+        suggestion: "Make sure release.apk exists in the uploads directory",
       });
     }
 
-    console.log("✅ APK file found, size:", fs.statSync(originalApkPath).size, "bytes");
+    console.log(
+      "✅ APK file found, size:",
+      fs.statSync(originalApkPath).size,
+      "bytes"
+    );
 
     // Create temporary directories (use /tmp for Render compatibility)
     const tempDir = path.join(
@@ -323,7 +348,7 @@ app.post("/api/download-apk", async (req, res) => {
     console.error("❌ Error stack:", error.stack);
 
     // Clean up temp directory in case of error
-    if (typeof tempDir !== 'undefined') {
+    if (typeof tempDir !== "undefined") {
       cleanupTempDir(tempDir, 2000); // 2 second delay
     }
 
@@ -352,8 +377,8 @@ app.post("/api/download-apk", async (req, res) => {
       res.status(500).json({
         error: "APK modification failed",
         details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-        timestamp: new Date().toISOString()
+        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+        timestamp: new Date().toISOString(),
       });
     }
   }
@@ -361,12 +386,12 @@ app.post("/api/download-apk", async (req, res) => {
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
-  res.json({ 
+  res.json({
     status: "Server is running",
     platform: "Render",
     timestamp: new Date().toISOString(),
     nodeVersion: process.version,
-    environment: process.env.NODE_ENV || "development"
+    environment: process.env.NODE_ENV || "development",
   });
 });
 
@@ -382,7 +407,7 @@ app.get("/api/debug", (req, res) => {
       javaVersion: null,
       tempDirExists: fs.existsSync("/tmp"),
       uploadsExists: fs.existsSync(path.join(__dirname, "uploads")),
-      toolsExists: fs.existsSync(path.join(__dirname, "tools"))
+      toolsExists: fs.existsSync(path.join(__dirname, "tools")),
     };
 
     // List files in current directory
@@ -421,11 +446,10 @@ app.get("/api/debug", (req, res) => {
       }
       res.json(debugInfo);
     });
-
   } catch (error) {
     res.status(500).json({
       error: "Debug endpoint failed",
-      details: error.message
+      details: error.message,
     });
   }
 });
@@ -434,14 +458,14 @@ app.get("/api/debug", (req, res) => {
 app.get("/api/test-apk", (req, res) => {
   try {
     const originalApkPath = path.join(__dirname, "uploads", "release.apk");
-    
+
     const result = {
       apkPath: originalApkPath,
       exists: fs.existsSync(originalApkPath),
       size: null,
       uploadsDir: path.join(__dirname, "uploads"),
       uploadsDirExists: fs.existsSync(path.join(__dirname, "uploads")),
-      filesInUploads: []
+      filesInUploads: [],
     };
 
     if (result.exists) {
@@ -457,7 +481,7 @@ app.get("/api/test-apk", (req, res) => {
     res.status(500).json({
       error: "Test APK endpoint failed",
       details: error.message,
-      stack: error.stack
+      stack: error.stack,
     });
   }
 });
