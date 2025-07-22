@@ -1,0 +1,8 @@
+node_modules
+.git
+*.ps1
+test-*.js
+temp/
+uploads/*.apk
+tools/
+APK-SIGNING-IMPLEMENTATION.md

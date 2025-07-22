@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { exec } = require("child_process");
 const util = require("util");
 
@@ -43,8 +44,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "*",
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // APK download endpoint
 app.post("/api/download-apk", async (req, res) => {
@@ -60,8 +67,11 @@ app.post("/api/download-apk", async (req, res) => {
       return res.status(404).json({ error: "Original APK file not found" });
     }
 
-    // Create temporary directories
-    const tempDir = path.join(__dirname, "temp");
+    // Create temporary directories (use /tmp for Render compatibility)
+    const tempDir = path.join(
+      "/tmp",
+      `apk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    );
     const decompileDir = path.join(tempDir, "decompiled");
     const modifiedApkPath = path.join(tempDir, "modified_release.apk");
     const signedApkPath = path.join(tempDir, "signed_modified_release.apk");
@@ -289,7 +299,6 @@ app.post("/api/download-apk", async (req, res) => {
     console.error("APK modification error:", error);
 
     // Clean up temp directory in case of error
-    const tempDir = path.join(__dirname, "temp");
     cleanupTempDir(tempDir, 2000); // 2 second delay
 
     // Send appropriate error message based on error type
