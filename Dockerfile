@@ -1,7 +1,10 @@
 FROM node:18-alpine
 
-# Install Java for APK tools (apktool and uber-apk-signer require Java)
-RUN apk add --no-cache openjdk17-jre
+# Install Java and required tools for APK processing
+RUN apk add --no-cache \
+    openjdk17-jre \
+    bash \
+    curl
 
 WORKDIR /app
 
@@ -14,8 +17,17 @@ RUN npm ci --only=production
 # Copy application files
 COPY . .
 
+# Ensure tools directory has proper permissions
+RUN chmod +x tools/*.jar || true
+
 # Create temp directory with proper permissions for APK processing
 RUN mkdir -p /tmp/apk-processing && chmod 777 /tmp/apk-processing
+
+# Verify Java installation
+RUN java -version
+
+# List contents to debug
+RUN ls -la uploads/ && ls -la tools/
 
 # Expose port
 EXPOSE 5000

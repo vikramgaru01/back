@@ -55,17 +55,38 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // APK download endpoint
 app.post("/api/download-apk", async (req, res) => {
+  console.log("📱 APK download request received");
+  
   try {
     // Use whatever payload is received from frontend
     const newConfig = req.body;
+    console.log("📋 Config received:", JSON.stringify(newConfig, null, 2));
 
     // Path to your original APK file
     const originalApkPath = path.join(__dirname, "uploads", "release.apk");
+    console.log("📂 Looking for APK at:", originalApkPath);
 
     // Check if original APK exists
     if (!fs.existsSync(originalApkPath)) {
-      return res.status(404).json({ error: "Original APK file not found" });
+      console.error("❌ Original APK file not found at:", originalApkPath);
+      
+      // List what's actually in the uploads directory for debugging
+      try {
+        const uploadsDir = path.join(__dirname, "uploads");
+        const files = fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir) : [];
+        console.log("📁 Files in uploads directory:", files);
+      } catch (err) {
+        console.error("❌ Error reading uploads directory:", err.message);
+      }
+      
+      return res.status(404).json({ 
+        error: "Original APK file not found",
+        expectedPath: originalApkPath,
+        suggestion: "Make sure release.apk exists in the uploads directory"
+      });
     }
+
+    console.log("✅ APK file found, size:", fs.statSync(originalApkPath).size, "bytes");
 
     // Create temporary directories (use /tmp for Render compatibility)
     const tempDir = path.join(
@@ -76,16 +97,18 @@ app.post("/api/download-apk", async (req, res) => {
     const modifiedApkPath = path.join(tempDir, "modified_release.apk");
     const signedApkPath = path.join(tempDir, "signed_modified_release.apk");
 
+    console.log("📁 Created temp directory:", tempDir);
+
     // Clean temp directory if exists
     if (fs.existsSync(tempDir)) {
       cleanupTempDir(tempDir, 0); // No delay for initial cleanup
     }
     fs.mkdirSync(tempDir, { recursive: true });
 
-    console.log("Starting APK modification process...");
+    console.log("🚀 Starting APK modification process...");
 
     // Verify Java and apktool are available
-    console.log("Verifying Java installation...");
+    console.log("☕ Verifying Java installation...");
     try {
       const { stdout: javaVersion } = await execAsync("java -version", {
         timeout: 10000,
@@ -294,12 +317,15 @@ app.post("/api/download-apk", async (req, res) => {
       cleanupTempDir(tempDir, 5000); // 5 second delay
     });
 
-    console.log("Signed APK download initiated successfully");
+    console.log("✅ Signed APK download initiated successfully");
   } catch (error) {
-    console.error("APK modification error:", error);
+    console.error("❌ APK modification error:", error);
+    console.error("❌ Error stack:", error.stack);
 
     // Clean up temp directory in case of error
-    cleanupTempDir(tempDir, 2000); // 2 second delay
+    if (typeof tempDir !== 'undefined') {
+      cleanupTempDir(tempDir, 2000); // 2 second delay
+    }
 
     // Send appropriate error message based on error type
     if (error.message.includes("config.json not found")) {
@@ -326,6 +352,8 @@ app.post("/api/download-apk", async (req, res) => {
       res.status(500).json({
         error: "APK modification failed",
         details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        timestamp: new Date().toISOString()
       });
     }
   }
@@ -333,7 +361,105 @@ app.post("/api/download-apk", async (req, res) => {
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
-  res.json({ status: "Server is running" });
+  res.json({ 
+    status: "Server is running",
+    platform: "Render",
+    timestamp: new Date().toISOString(),
+    nodeVersion: process.version,
+    environment: process.env.NODE_ENV || "development"
+  });
+});
+
+// Debug endpoint to check file system and Java
+app.get("/api/debug", (req, res) => {
+  try {
+    const debugInfo = {
+      currentDir: __dirname,
+      tempDir: "/tmp",
+      filesInApp: [],
+      filesInUploads: [],
+      filesInTools: [],
+      javaVersion: null,
+      tempDirExists: fs.existsSync("/tmp"),
+      uploadsExists: fs.existsSync(path.join(__dirname, "uploads")),
+      toolsExists: fs.existsSync(path.join(__dirname, "tools"))
+    };
+
+    // List files in current directory
+    try {
+      debugInfo.filesInApp = fs.readdirSync(__dirname);
+    } catch (err) {
+      debugInfo.filesInApp = `Error: ${err.message}`;
+    }
+
+    // List files in uploads
+    try {
+      const uploadsPath = path.join(__dirname, "uploads");
+      if (fs.existsSync(uploadsPath)) {
+        debugInfo.filesInUploads = fs.readdirSync(uploadsPath);
+      }
+    } catch (err) {
+      debugInfo.filesInUploads = `Error: ${err.message}`;
+    }
+
+    // List files in tools
+    try {
+      const toolsPath = path.join(__dirname, "tools");
+      if (fs.existsSync(toolsPath)) {
+        debugInfo.filesInTools = fs.readdirSync(toolsPath);
+      }
+    } catch (err) {
+      debugInfo.filesInTools = `Error: ${err.message}`;
+    }
+
+    // Check Java version
+    exec("java -version", (error, stdout, stderr) => {
+      if (error) {
+        debugInfo.javaVersion = `Error: ${error.message}`;
+      } else {
+        debugInfo.javaVersion = stderr || stdout;
+      }
+      res.json(debugInfo);
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      error: "Debug endpoint failed",
+      details: error.message
+    });
+  }
+});
+
+// Simple test endpoint to check APK file access
+app.get("/api/test-apk", (req, res) => {
+  try {
+    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
+    
+    const result = {
+      apkPath: originalApkPath,
+      exists: fs.existsSync(originalApkPath),
+      size: null,
+      uploadsDir: path.join(__dirname, "uploads"),
+      uploadsDirExists: fs.existsSync(path.join(__dirname, "uploads")),
+      filesInUploads: []
+    };
+
+    if (result.exists) {
+      result.size = fs.statSync(originalApkPath).size;
+    }
+
+    if (result.uploadsDirExists) {
+      result.filesInUploads = fs.readdirSync(path.join(__dirname, "uploads"));
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      error: "Test APK endpoint failed",
+      details: error.message,
+      stack: error.stack
+    });
+  }
 });
 
 app.listen(PORT, () => {
