@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
+const fs = require("fs").promises; // Use promises for cleaner async/await
 const os = require("os");
 const { exec } = require("child_process");
 const util = require("util");
@@ -9,19 +9,25 @@ const util = require("util");
 const execAsync = util.promisify(exec);
 
 // Helper function to safely clean up temp directory with retry logic
-const cleanupTempDir = (tempDirPath, delay = 1000) => {
-  if (!fs.existsSync(tempDirPath)) return;
+const cleanupTempDir = async (tempDirPath, delay = 1000) => {
+  if (
+    !(await fs
+      .access(tempDirPath)
+      .then(() => true)
+      .catch(() => false))
+  )
+    return;
 
-  const cleanup = () => {
+  const cleanup = async () => {
     try {
-      fs.rmSync(tempDirPath, { recursive: true, force: true });
+      await fs.rm(tempDirPath, { recursive: true, force: true });
       console.log("Temp directory cleaned up successfully");
     } catch (error) {
       if (error.code === "EBUSY" || error.code === "ENOTEMPTY") {
         console.warn("Files still in use, retrying cleanup in 5 seconds...");
-        setTimeout(() => {
+        setTimeout(async () => {
           try {
-            fs.rmSync(tempDirPath, { recursive: true, force: true });
+            await fs.rm(tempDirPath, { recursive: true, force: true });
             console.log("Temp directory cleaned up successfully on retry");
           } catch (retryError) {
             console.warn("Final cleanup attempt failed:", retryError.message);
@@ -36,7 +42,7 @@ const cleanupTempDir = (tempDirPath, delay = 1000) => {
   if (delay > 0) {
     setTimeout(cleanup, delay);
   } else {
-    cleanup();
+    await cleanup();
   }
 };
 
@@ -46,7 +52,7 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
+    origin: process.env.FRONTEND_URL || "*", // Set FRONTEND_URL in Render.com dashboard
     credentials: true,
   })
 );
@@ -75,25 +81,37 @@ app.get("/", (req, res) => {
 // APK download endpoint
 app.post("/api/download-apk", async (req, res) => {
   console.log("📱 APK download request received");
+  let tempDir; // Declare tempDir here for cleanup in case of errors
 
   try {
-    // Use whatever payload is received from frontend
+    // Validate payload
     const newConfig = req.body;
+    if (!newConfig || Object.keys(newConfig).length === 0) {
+      throw new Error("No configuration data provided in request body");
+    }
     console.log("📋 Config received:", JSON.stringify(newConfig, null, 2));
 
-    // Path to your original APK file
+    // Path to original APK file
     const originalApkPath = path.join(__dirname, "uploads", "release.apk");
     console.log("📂 Looking for APK at:", originalApkPath);
 
     // Check if original APK exists
-    if (!fs.existsSync(originalApkPath)) {
+    if (
+      !(await fs
+        .access(originalApkPath)
+        .then(() => true)
+        .catch(() => false))
+    ) {
       console.error("❌ Original APK file not found at:", originalApkPath);
 
-      // List what's actually in the uploads directory for debugging
+      // List what's in the uploads directory for debugging
       try {
         const uploadsDir = path.join(__dirname, "uploads");
-        const files = fs.existsSync(uploadsDir)
-          ? fs.readdirSync(uploadsDir)
+        const files = (await fs
+          .access(uploadsDir)
+          .then(() => true)
+          .catch(() => false))
+          ? await fs.readdir(uploadsDir)
           : [];
         console.log("📁 Files in uploads directory:", files);
       } catch (err) {
@@ -109,12 +127,12 @@ app.post("/api/download-apk", async (req, res) => {
 
     console.log(
       "✅ APK file found, size:",
-      fs.statSync(originalApkPath).size,
+      (await fs.stat(originalApkPath)).size,
       "bytes"
     );
 
-    // Create temporary directories (use /tmp for Render compatibility)
-    const tempDir = path.join(
+    // Create temporary directories
+    tempDir = path.join(
       "/tmp",
       `apk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     );
@@ -125,14 +143,19 @@ app.post("/api/download-apk", async (req, res) => {
     console.log("📁 Created temp directory:", tempDir);
 
     // Clean temp directory if exists
-    if (fs.existsSync(tempDir)) {
-      cleanupTempDir(tempDir, 0); // No delay for initial cleanup
+    if (
+      await fs
+        .access(tempDir)
+        .then(() => true)
+        .catch(() => false)
+    ) {
+      await cleanupTempDir(tempDir, 0);
     }
-    fs.mkdirSync(tempDir, { recursive: true });
+    await fs.mkdir(tempDir, { recursive: true });
 
     console.log("🚀 Starting APK modification process...");
 
-    // Verify Java and apktool are available
+    // Verify Java and apktool
     console.log("☕ Verifying Java installation...");
     try {
       const { stdout: javaVersion } = await execAsync("java -version", {
@@ -146,41 +169,32 @@ app.post("/api/download-apk", async (req, res) => {
     }
 
     console.log("Verifying apktool...");
-    const apktoolPath = path.join(__dirname, "tools", "apktool.bat");
     const apktoolJarPath = path.join(__dirname, "tools", "apktool.jar");
-    if (!fs.existsSync(apktoolPath)) {
+    if (
+      !(await fs
+        .access(apktoolJarPath)
+        .then(() => true)
+        .catch(() => false))
+    ) {
       throw new Error(
-        "apktool.bat not found. Please run setup-apk-tools.ps1 first."
-      );
-    }
-    if (!fs.existsSync(apktoolJarPath)) {
-      throw new Error(
-        "apktool.jar not found. Please run setup-apk-tools.ps1 first."
+        "apktool.jar not found. Please run setup-apk-tools.sh or upload manually."
       );
     }
 
     // Step 1: Decompile APK using apktool
     console.log("Decompiling APK...");
-
-    // Add timeout and better error handling
-    // Use Java JAR directly to avoid Windows batch file prompt issues
     const decompileCommand = `java -jar "${apktoolJarPath}" d "${originalApkPath}" -o "${decompileDir}" --force-all`;
     console.log(`Running command: ${decompileCommand}`);
 
     try {
       const { stdout, stderr } = await execAsync(decompileCommand, {
-        timeout: 300000, // 5 minute timeout
-        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        timeout: 300000,
+        maxBuffer: 1024 * 1024 * 10,
         shell: true,
       });
 
-      if (stderr) {
-        console.log("apktool stderr:", stderr);
-      }
-      if (stdout) {
-        console.log("apktool stdout:", stdout);
-      }
-
+      if (stderr) console.log("apktool stderr:", stderr);
+      if (stdout) console.log("apktool stdout:", stdout);
       console.log("APK decompilation completed successfully");
     } catch (error) {
       console.error("Decompilation failed:", error);
@@ -200,9 +214,13 @@ app.post("/api/download-apk", async (req, res) => {
       "config.json"
     );
 
-    if (!fs.existsSync(configPath)) {
-      // Clean up temp directory before throwing error
-      cleanupTempDir(tempDir, 0);
+    if (
+      !(await fs
+        .access(configPath)
+        .then(() => true)
+        .catch(() => false))
+    ) {
+      await cleanupTempDir(tempDir, 0);
       throw new Error(
         "config.json not found in APK at expected location: assets/flutter_assets/assets/config.json"
       );
@@ -212,19 +230,16 @@ app.post("/api/download-apk", async (req, res) => {
 
     // Read and modify config.json
     try {
-      const configContent = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const configContent = JSON.parse(await fs.readFile(configPath, "utf8"));
       console.log("Original config.json content:", configContent);
 
-      // Replace entire config with new data from frontend
-      fs.writeFileSync(configPath, JSON.stringify(newConfig, null, 2));
+      await fs.writeFile(configPath, JSON.stringify(newConfig, null, 2));
 
-      // Verify the file was updated
-      const updatedContent = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const updatedContent = JSON.parse(await fs.readFile(configPath, "utf8"));
       console.log("Updated config.json content:", updatedContent);
       console.log("Config.json replaced with new payload data");
     } catch (jsonError) {
-      // Clean up temp directory before throwing error
-      cleanupTempDir(tempDir, 0);
+      await cleanupTempDir(tempDir, 0);
       throw new Error(
         `Failed to read or modify config.json: ${jsonError.message}`
       );
@@ -237,18 +252,13 @@ app.post("/api/download-apk", async (req, res) => {
 
     try {
       const { stdout, stderr } = await execAsync(recompileCommand, {
-        timeout: 300000, // 5 minute timeout
-        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        timeout: 300000,
+        maxBuffer: 1024 * 1024 * 10,
         shell: true,
       });
 
-      if (stderr) {
-        console.log("apktool recompile stderr:", stderr);
-      }
-      if (stdout) {
-        console.log("apktool recompile stdout:", stdout);
-      }
-
+      if (stderr) console.log("apktool recompile stderr:", stderr);
+      if (stdout) console.log("apktool recompile stdout:", stdout);
       console.log("APK recompilation completed successfully");
     } catch (error) {
       console.error("Recompilation failed:", error);
@@ -262,15 +272,17 @@ app.post("/api/download-apk", async (req, res) => {
     console.log("Signing APK...");
     const uberSignerPath = path.join(__dirname, "tools", "uber-apk-signer.jar");
 
-    // Check if uber-apk-signer exists
-    if (!fs.existsSync(uberSignerPath)) {
+    if (
+      !(await fs
+        .access(uberSignerPath)
+        .then(() => true)
+        .catch(() => false))
+    ) {
       throw new Error(
-        "uber-apk-signer.jar not found. Please run setup-uber-signer.ps1 first."
+        "uber-apk-signer.jar not found. Please run setup-uber-signer.sh or upload manually."
       );
     }
 
-    // Sign the APK using uber-apk-signer with default key
-    // Note: Cannot use both --out and --overwrite together
     const signCommand = `java -jar "${uberSignerPath}" --apks "${modifiedApkPath}" --out "${path.dirname(
       signedApkPath
     )}" --allowResign --verbose`;
@@ -278,35 +290,31 @@ app.post("/api/download-apk", async (req, res) => {
 
     try {
       const { stdout, stderr } = await execAsync(signCommand, {
-        timeout: 300000, // 5 minute timeout
-        maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+        timeout: 300000,
+        maxBuffer: 1024 * 1024 * 10,
         shell: true,
       });
 
-      if (stderr) {
-        console.log("uber-apk-signer stderr:", stderr);
-      }
-      if (stdout) {
-        console.log("uber-apk-signer stdout:", stdout);
-      }
+      if (stderr) console.log("uber-apk-signer stderr:", stderr);
+      if (stdout) console.log("uber-apk-signer stdout:", stdout);
 
-      // uber-apk-signer creates a file with -aligned-debugSigned suffix
       const actualSignedApkPath = path.join(
         tempDir,
         "modified_release-aligned-debugSigned.apk"
       );
 
-      // Check if the signed APK was created
-      if (!fs.existsSync(actualSignedApkPath)) {
-        // List all files in temp directory for debugging
-        const tempFiles = fs.readdirSync(tempDir);
+      if (
+        !(await fs
+          .access(actualSignedApkPath)
+          .then(() => true)
+          .catch(() => false))
+      ) {
+        const tempFiles = await fs.readdir(tempDir);
         console.log("Files in temp directory:", tempFiles);
         throw new Error("Signed APK was not created successfully");
       }
 
-      // Rename to our expected path for consistency
-      fs.renameSync(actualSignedApkPath, signedApkPath);
-
+      await fs.rename(actualSignedApkPath, signedApkPath);
       console.log("APK signing completed successfully");
     } catch (error) {
       console.error("APK signing failed:", error);
@@ -319,7 +327,7 @@ app.post("/api/download-apk", async (req, res) => {
     console.log("APK modification and signing completed successfully");
 
     // Step 5: Send the signed APK
-    const stat = fs.statSync(signedApkPath);
+    const stat = await fs.stat(signedApkPath);
     const fileSize = stat.size;
 
     res.setHeader("Content-Type", "application/vnd.android.package-archive");
@@ -329,7 +337,7 @@ app.post("/api/download-apk", async (req, res) => {
     );
     res.setHeader("Content-Length", fileSize);
 
-    const fileStream = fs.createReadStream(signedApkPath);
+    const fileStream = (await import("fs")).createReadStream(signedApkPath);
     fileStream.pipe(res);
 
     fileStream.on("error", (err) => {
@@ -338,8 +346,7 @@ app.post("/api/download-apk", async (req, res) => {
     });
 
     fileStream.on("end", () => {
-      // Clean up temp files after download with delay to handle file locks
-      cleanupTempDir(tempDir, 5000); // 5 second delay
+      cleanupTempDir(tempDir, 5000);
     });
 
     console.log("✅ Signed APK download initiated successfully");
@@ -347,12 +354,10 @@ app.post("/api/download-apk", async (req, res) => {
     console.error("❌ APK modification error:", error);
     console.error("❌ Error stack:", error.stack);
 
-    // Clean up temp directory in case of error
-    if (typeof tempDir !== "undefined") {
-      cleanupTempDir(tempDir, 2000); // 2 second delay
+    if (tempDir) {
+      await cleanupTempDir(tempDir, 2000);
     }
 
-    // Send appropriate error message based on error type
     if (error.message.includes("config.json not found")) {
       res.status(404).json({
         error: "Configuration file not found in APK",
@@ -396,7 +401,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // Debug endpoint to check file system and Java
-app.get("/api/debug", (req, res) => {
+app.get("/api/debug", async (req, res) => {
   try {
     const debugInfo = {
       currentDir: __dirname,
@@ -405,47 +410,38 @@ app.get("/api/debug", (req, res) => {
       filesInUploads: [],
       filesInTools: [],
       javaVersion: null,
-      tempDirExists: fs.existsSync("/tmp"),
-      uploadsExists: fs.existsSync(path.join(__dirname, "uploads")),
-      toolsExists: fs.existsSync(path.join(__dirname, "tools")),
+      tempDirExists: await fs
+        .access("/tmp")
+        .then(() => true)
+        .catch(() => false),
+      uploadsExists: await fs
+        .access(path.join(__dirname, "uploads"))
+        .then(() => true)
+        .catch(() => false),
+      toolsExists: await fs
+        .access(path.join(__dirname, "tools"))
+        .then(() => true)
+        .catch(() => false),
     };
 
-    // List files in current directory
+    debugInfo.filesInApp = await fs
+      .readdir(__dirname)
+      .catch((err) => `Error: ${err.message}`);
+    debugInfo.filesInUploads = await fs
+      .readdir(path.join(__dirname, "uploads"))
+      .catch((err) => `Error: ${err.message}`);
+    debugInfo.filesInTools = await fs
+      .readdir(path.join(__dirname, "tools"))
+      .catch((err) => `Error: ${err.message}`);
+
     try {
-      debugInfo.filesInApp = fs.readdirSync(__dirname);
-    } catch (err) {
-      debugInfo.filesInApp = `Error: ${err.message}`;
+      const { stdout, stderr } = await execAsync("java -version");
+      debugInfo.javaVersion = stderr || stdout;
+    } catch (error) {
+      debugInfo.javaVersion = `Error: ${error.message}`;
     }
 
-    // List files in uploads
-    try {
-      const uploadsPath = path.join(__dirname, "uploads");
-      if (fs.existsSync(uploadsPath)) {
-        debugInfo.filesInUploads = fs.readdirSync(uploadsPath);
-      }
-    } catch (err) {
-      debugInfo.filesInUploads = `Error: ${err.message}`;
-    }
-
-    // List files in tools
-    try {
-      const toolsPath = path.join(__dirname, "tools");
-      if (fs.existsSync(toolsPath)) {
-        debugInfo.filesInTools = fs.readdirSync(toolsPath);
-      }
-    } catch (err) {
-      debugInfo.filesInTools = `Error: ${err.message}`;
-    }
-
-    // Check Java version
-    exec("java -version", (error, stdout, stderr) => {
-      if (error) {
-        debugInfo.javaVersion = `Error: ${error.message}`;
-      } else {
-        debugInfo.javaVersion = stderr || stdout;
-      }
-      res.json(debugInfo);
-    });
+    res.json(debugInfo);
   } catch (error) {
     res.status(500).json({
       error: "Debug endpoint failed",
@@ -454,26 +450,32 @@ app.get("/api/debug", (req, res) => {
   }
 });
 
-// Simple test endpoint to check APK file access
-app.get("/api/test-apk", (req, res) => {
+// Test APK endpoint
+app.get("/api/test-apk", async (req, res) => {
   try {
-    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
+    const originalApkPath = path.join(__dirname, "Uploads", "release.apk");
 
     const result = {
       apkPath: originalApkPath,
-      exists: fs.existsSync(originalApkPath),
+      exists: await fs
+        .access(originalApkPath)
+        .then(() => true)
+        .catch(() => false),
       size: null,
-      uploadsDir: path.join(__dirname, "uploads"),
-      uploadsDirExists: fs.existsSync(path.join(__dirname, "uploads")),
+      uploadsDir: path.join(__dirname, "Uploads"),
+      uploadsDirExists: await fs
+        .access(path.join(__dirname, "Uploads"))
+        .then(() => true)
+        .catch(() => false),
       filesInUploads: [],
     };
 
     if (result.exists) {
-      result.size = fs.statSync(originalApkPath).size;
+      result.size = (await fs.stat(originalApkPath)).size;
     }
 
     if (result.uploadsDirExists) {
-      result.filesInUploads = fs.readdirSync(path.join(__dirname, "uploads"));
+      result.filesInUploads = await fs.readdir(path.join(__dirname, "Uploads"));
     }
 
     res.json(result);
@@ -486,6 +488,7 @@ app.get("/api/test-apk", (req, res) => {
   }
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
