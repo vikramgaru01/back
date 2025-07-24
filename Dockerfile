@@ -2,10 +2,7 @@
 FROM node:latest
 
 # Install necessary dependencies for APK tools and signing
-RUN apt-get update && apt-get install -y --no-install-recommends 
-    openjdk-17-jdk 
-    unzip 
-    wget 
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk unzip wget 
     && rm -rf /var/lib/apt/lists/*
 
 # Set ANDROID_HOME environment variable and download build tools
