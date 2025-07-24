@@ -1,40 +1,36 @@
-FROM node:18-alpine
+# Use a base image with Node.js (assuming your server.js needs Node)
+FROM node:latest
 
-# Install Java and required tools for APK processing
-RUN apk add --no-cache \
-    openjdk17-jre \
-    bash \
-    curl
+# Install necessary dependencies for APK tools and signing
+RUN apt-get update && apt-get install -y --no-install-recommends 
+    openjdk-17-jdk 
+    unzip 
+    wget 
+    # Install Android SDK build tools
+    android-sdk-build-tools 
+    && rm -rf /var/lib/apt/lists/*
 
+# Set ANDROID_HOME environment variable
+ENV ANDROID_HOME /usr/lib/android-sdk
+ENV PATH $PATH:$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)
+
+# Set working directory
 WORKDIR /app
 
-# Copy package files first for better Docker layer caching
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install Node.js dependencies
+RUN npm install
 
-# Copy application files
+# Copy the rest of the application code
 COPY . .
 
-# Ensure tools directory has proper permissions
-RUN chmod +x tools/*.jar || true
+# Make sure the uber-apk-signer.jar is executable
+RUN chmod +x ./tools/uber-apk-signer.jar
 
-# Create temp directory with proper permissions for APK processing
-RUN mkdir -p /tmp/apk-processing && chmod 777 /tmp/apk-processing
-
-# Verify Java installation
-RUN java -version
-
-# List contents to debug
-RUN ls -la uploads/ && ls -la tools/
-
-# Expose port
+# Expose the port your Node.js server is listening on
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Start the application
+# Start the Node.js server
 CMD ["node", "server.js"]
