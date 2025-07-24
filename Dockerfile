@@ -24,7 +24,7 @@ COPY package*.json ./
 RUN npm install
 
 # Copy the rest of the application code
-COPY . .
+COPY . .+
 
 # Expose the port the app runs on
 EXPOSE 5000
