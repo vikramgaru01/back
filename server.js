@@ -21,7 +21,7 @@ const cleanupTempDir = async (tempDirPath, delay = 1000) => {
   const cleanup = async () => {
     try {
       await fs.rm(tempDirPath, { recursive: true, force: true });
-      console.log("Temp directory cleaned up successfully");
+      console.log("Temp directory cleaned up successfully.");
     } catch (error) {
       if (error.code === "EBUSY" || error.code === "ENOTEMPTY") {
         console.warn("Files still in use, retrying cleanup in 5 seconds...");
