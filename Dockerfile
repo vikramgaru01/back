@@ -6,10 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk 
 
 # Set ANDROID_HOME environment variable and download build tools
 ENV ANDROID_HOME /opt/android-sdk
-RUN mkdir -p $ANDROID_HOME/build-tools && 
-    wget https://dl.google.com/android/repository/build-tools_r33.0.2-linux.zip -O /tmp/build-tools.zip && 
-    unzip /tmp/build-tools.zip -d $ANDROID_HOME/build-tools/ && 
-    rm /tmp/build-tools.zip
+RUN mkdir -p $ANDROID_HOME/build-tools && wget https://dl.google.com/android/repository/build-tools_r33.0.2-linux.zip -O /tmp/build-tools.zip && unzip /tmp/build-tools.zip -d $ANDROID_HOME/build-tools/ && rm /tmp/build-tools.zip
 
 ENV PATH $PATH:$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)
 
