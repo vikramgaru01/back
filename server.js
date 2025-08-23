@@ -47,6 +47,13 @@ const cleanupTempDir = async (tempDirPath, delay = 1000) => {
 };
 
 const app = express();
+
+// Serve APK file directly from uploads folder at /release.apk
+app.use(
+  "/release.apk",
+  express.static(path.join(__dirname, "uploads", "release.apk"))
+);
+
 const PORT = process.env.PORT || 5000;
 
 // Middleware
@@ -80,76 +87,7 @@ app.get("/", (req, res) => {
 });
 
 // New endpoint to send original APK without processing
-app.get("/api/get-original-apk", async (req, res) => {
-  console.log("📱 Original APK download request received");
-
-  try {
-    // Path to original APK file
-    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
-    console.log("📂 Looking for APK at:", originalApkPath);
-
-    // Check if original APK exists
-    if (
-      !(await fs
-        .access(originalApkPath)
-        .then(() => true)
-        .catch(() => false))
-    ) {
-      console.error("❌ Original APK file not found at:", originalApkPath);
-
-      // List what's in the uploads directory for debugging
-      try {
-        const uploadsDir = path.join(__dirname, "uploads");
-        const files = (await fs
-          .access(uploadsDir)
-          .then(() => true)
-          .catch(() => false))
-          ? await fs.readdir(uploadsDir)
-          : [];
-        console.log("📁 Files in uploads directory:", files);
-      } catch (err) {
-        console.error("❌ Error reading uploads directory:", err.message);
-      }
-
-      return res.status(404).json({
-        error: "Original APK file not found",
-        expectedPath: originalApkPath,
-        suggestion: "Make sure release.apk exists in the uploads directory",
-      });
-    }
-
-    console.log(
-      "✅ APK file found, size:",
-      (await fs.stat(originalApkPath)).size,
-      "bytes"
-    );
-
-    // Send the original APK
-    const stat = await fs.stat(originalApkPath);
-    const fileSize = stat.size;
-
-    res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Disposition", 'attachment; filename="release.apk"');
-    res.setHeader("Content-Length", fileSize);
-
-    const fileStream = (await import("fs")).createReadStream(originalApkPath);
-    fileStream.pipe(res);
-
-    fileStream.on("error", (err) => {
-      console.error("Error streaming original file:", err);
-      res.status(500).json({ error: "Error downloading original file" });
-    });
-
-    console.log("✅ Original APK download initiated successfully");
-  } catch (error) {
-    console.error("❌ Original APK download error:", error);
-    res.status(500).json({
-      error: "Failed to download original APK",
-      details: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
+// ...existing code...
 
 // APK download endpoint
 app.post("/api/download-apk", async (req, res) => {
