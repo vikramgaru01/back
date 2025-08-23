@@ -85,7 +85,7 @@ app.get("/api/get-original-apk", async (req, res) => {
 
   try {
     // Path to original APK file
-    const originalApkPath = path.join(__dirname, "Uploads", "release.apk");
+    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
     console.log("📂 Looking for APK at:", originalApkPath);
 
     // Check if original APK exists
@@ -99,7 +99,7 @@ app.get("/api/get-original-apk", async (req, res) => {
 
       // List what's in the uploads directory for debugging
       try {
-        const uploadsDir = path.join(__dirname, "Uploads");
+        const uploadsDir = path.join(__dirname, "uploads");
         const files = (await fs
           .access(uploadsDir)
           .then(() => true)
@@ -165,7 +165,7 @@ app.post("/api/download-apk", async (req, res) => {
     console.log("📋 Config received:", JSON.stringify(newConfig, null, 2));
 
     // Path to original APK file
-    const originalApkPath = path.join(__dirname, "Uploads", "release.apk");
+    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
     console.log("📂 Looking for APK at:", originalApkPath);
 
     // Check if original APK exists
@@ -179,7 +179,7 @@ app.post("/api/download-apk", async (req, res) => {
 
       // List what's in the uploads directory for debugging
       try {
-        const uploadsDir = path.join(__dirname, "Uploads");
+        const uploadsDir = path.join(__dirname, "uploads");
         const files = (await fs
           .access(uploadsDir)
           .then(() => true)
@@ -526,7 +526,7 @@ app.get("/api/debug", async (req, res) => {
 // Test APK endpoint
 app.get("/api/test-apk", async (req, res) => {
   try {
-    const originalApkPath = path.join(__dirname, "Uploads", "release.apk");
+    const originalApkPath = path.join(__dirname, "uploads", "release.apk");
 
     const result = {
       apkPath: originalApkPath,
@@ -535,9 +535,9 @@ app.get("/api/test-apk", async (req, res) => {
         .then(() => true)
         .catch(() => false),
       size: null,
-      uploadsDir: path.join(__dirname, "Uploads"),
+      uploadsDir: path.join(__dirname, "uploads"),
       uploadsDirExists: await fs
-        .access(path.join(__dirname, "Uploads"))
+        .access(path.join(__dirname, "uploads"))
         .then(() => true)
         .catch(() => false),
       filesInUploads: [],
@@ -548,7 +548,7 @@ app.get("/api/test-apk", async (req, res) => {
     }
 
     if (result.uploadsDirExists) {
-      result.filesInUploads = await fs.readdir(path.join(__dirname, "Uploads"));
+      result.filesInUploads = await fs.readdir(path.join(__dirname, "uploads"));
     }
 
     res.json(result);
