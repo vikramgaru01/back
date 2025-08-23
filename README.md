@@ -26,6 +26,7 @@ This server processes Android APK files by decompiling them, modifying configura
    ```
 
 ## Usage
+/api/get-original-apk   for getting original apk
 
 The server provides an endpoint `/api/download-apk` that:
 
