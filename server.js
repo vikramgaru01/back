@@ -1,8 +1,8 @@
 const express = require("express");
+const crypto = require("crypto");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs").promises; // Use promises for cleaner async/await
-const os = require("os");
 const { exec } = require("child_process");
 const util = require("util");
 
@@ -47,6 +47,26 @@ const cleanupTempDir = async (tempDirPath, delay = 1000) => {
 };
 
 const app = express();
+// In-memory APK metadata store (use file/db for persistence in production)
+const apkStore = {};
+const APK_DIR = path.join(__dirname, "user_apks");
+const APK_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+
+// Ensure APK directory exists
+fs.mkdir(APK_DIR, { recursive: true });
+
+// Cleanup expired APKs every 10 minutes
+setInterval(async () => {
+  const now = Date.now();
+  for (const key in apkStore) {
+    if (apkStore[key].expires < now) {
+      try {
+        await fs.rm(apkStore[key].filePath, { force: true });
+      } catch {}
+      delete apkStore[key];
+    }
+  }
+}, 10 * 60 * 1000);
 
 // Serve APK file directly from uploads folder at /release.apk
 app.use(
@@ -102,45 +122,19 @@ app.post("/api/download-apk", async (req, res) => {
     }
     console.log("📋 Config received:", JSON.stringify(newConfig, null, 2));
 
+    // User identification (replace with real user auth in production)
+    const userId = req.headers["x-user-id"] || "guest";
+
     // Path to original APK file
     const originalApkPath = path.join(__dirname, "uploads", "release.apk");
-    console.log("📂 Looking for APK at:", originalApkPath);
-
-    // Check if original APK exists
     if (
       !(await fs
         .access(originalApkPath)
         .then(() => true)
         .catch(() => false))
     ) {
-      console.error("❌ Original APK file not found at:", originalApkPath);
-
-      // List what's in the uploads directory for debugging
-      try {
-        const uploadsDir = path.join(__dirname, "uploads");
-        const files = (await fs
-          .access(uploadsDir)
-          .then(() => true)
-          .catch(() => false))
-          ? await fs.readdir(uploadsDir)
-          : [];
-        console.log("📁 Files in uploads directory:", files);
-      } catch (err) {
-        console.error("❌ Error reading uploads directory:", err.message);
-      }
-
-      return res.status(404).json({
-        error: "Original APK file not found",
-        expectedPath: originalApkPath,
-        suggestion: "Make sure release.apk exists in the uploads directory",
-      });
+      return res.status(404).json({ error: "Original APK file not found" });
     }
-
-    console.log(
-      "✅ APK file found, size:",
-      (await fs.stat(originalApkPath)).size,
-      "bytes"
-    );
 
     // Create temporary directories
     tempDir = path.join(
@@ -338,29 +332,28 @@ app.post("/api/download-apk", async (req, res) => {
     console.log("APK modification and signing completed successfully");
 
     // Step 5: Send the signed APK
-    const stat = await fs.stat(signedApkPath);
-    const fileSize = stat.size;
+    // Save signed APK to user_apks with unique name
+    const apkId = crypto.randomUUID();
+    const userApkName = `${userId}_${apkId}.apk`;
+    const userApkPath = path.join(APK_DIR, userApkName);
+    await fs.copyFile(signedApkPath, userApkPath);
 
-    res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader(
-      "Content-Disposition",
-      'attachment; filename="signed_modified_release.apk"'
-    );
-    res.setHeader("Content-Length", fileSize);
+    // Store metadata
+    apkStore[apkId] = {
+      userId,
+      filePath: userApkPath,
+      created: Date.now(),
+      expires: Date.now() + APK_EXPIRY_MS,
+      fileName: userApkName,
+    };
 
-    const fileStream = (await import("fs")).createReadStream(signedApkPath);
-    fileStream.pipe(res);
-
-    fileStream.on("error", (err) => {
-      console.error("Error streaming signed file:", err);
-      res.status(500).json({ error: "Error downloading signed file" });
+    // Respond with APK info
+    res.json({
+      apkId,
+      fileName: userApkName,
+      expires: apkStore[apkId].expires,
+      downloadUrl: `/api/download-user-apk/${apkId}`,
     });
-
-    fileStream.on("end", () => {
-      cleanupTempDir(tempDir, 5000);
-    });
-
-    console.log("✅ Signed APK download initiated successfully");
   } catch (error) {
     console.error("❌ APK modification error:", error);
     console.error("❌ Error stack:", error.stack);
@@ -401,6 +394,36 @@ app.post("/api/download-apk", async (req, res) => {
 });
 
 // Health check endpoint
+// List user's APKs (for "Your APKs" table)
+app.get("/api/list-user-apks", (req, res) => {
+  const userId = req.headers["x-user-id"] || "guest";
+  const now = Date.now();
+  const userApks = Object.entries(apkStore)
+    .filter(([_, meta]) => meta.userId === userId && meta.expires > now)
+    .map(([apkId, meta]) => ({
+      apkId,
+      fileName: meta.fileName,
+      expires: meta.expires,
+    }));
+  res.json({ apks: userApks });
+});
+
+// Download user's APK
+app.get("/api/download-user-apk/:apkId", async (req, res) => {
+  const { apkId } = req.params;
+  const meta = apkStore[apkId];
+  if (!meta || meta.expires < Date.now()) {
+    return res.status(404).json({ error: "APK expired or not found" });
+  }
+  res.setHeader("Content-Type", "application/vnd.android.package-archive");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${meta.fileName}"`
+  );
+  const fileStream = (await import("fs")).createReadStream(meta.filePath);
+  fileStream.pipe(res);
+  fileStream.on("error", () => res.status(500).end());
+});
 app.get("/api/health", (req, res) => {
   res.json({
     status: "Server is running",
