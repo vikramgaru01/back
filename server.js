@@ -50,7 +50,7 @@ const cleanupTempDir = async (tempDirPath, delay = 1000) => {
 const app = express();
 
 // Initialize Firebase Admin SDK
-const serviceAccount = require("./firebase-service-account.json");
+const serviceAccount = require("/etc/secrets/web2appify-1e443-firebase-adminsdk-fbsvc-761caff29a.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL:
