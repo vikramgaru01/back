@@ -55,7 +55,7 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
   databaseURL:
     process.env.FIREBASE_DATABASE_URL ||
-    "https://<your-project-id>.firebaseio.com",
+    "https://web2appify-1e443.firebaseio.com",
 });
 const db = admin.database();
 // In-memory APK metadata store (use file/db for persistence in production)
