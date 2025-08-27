@@ -423,16 +423,25 @@ app.get("/api/list-user-apks", async (req, res) => {
 // Download user's APK
 app.get("/api/download-user-apk/:apkId", async (req, res) => {
   const { apkId } = req.params;
-  const meta = apkStore[apkId];
+  // Find the userId by searching all users in Firebase
+  const snapshot = await db.ref("apks").once("value");
+  let meta = null;
+  snapshot.forEach((userSnap) => {
+    const userApks = userSnap.val();
+    if (userApks && userApks[apkId]) {
+      meta = userApks[apkId];
+    }
+  });
   if (!meta || meta.expires < Date.now()) {
     return res.status(404).json({ error: "APK expired or not found" });
   }
+  const filePath = path.join(__dirname, "user_apks", meta.fileName);
   res.setHeader("Content-Type", "application/vnd.android.package-archive");
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${meta.fileName}"`
   );
-  const fileStream = (await import("fs")).createReadStream(meta.filePath);
+  const fileStream = (await import("fs")).createReadStream(filePath);
   fileStream.pipe(res);
   fileStream.on("error", () => res.status(500).end());
 });
