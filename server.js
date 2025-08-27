@@ -1,3 +1,33 @@
+// Google Drive integration
+const { google } = require("googleapis");
+const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+const DRIVE_CREDENTIALS = require("./credentials.json");
+const { client_secret, client_id, redirect_uris } = DRIVE_CREDENTIALS.installed;
+const oAuth2Client = new google.auth.OAuth2(
+  client_id,
+  client_secret,
+  redirect_uris[0]
+);
+const DRIVE_TOKEN_PATH = "token.json";
+if (require("fs").existsSync(DRIVE_TOKEN_PATH)) {
+  oAuth2Client.setCredentials(
+    JSON.parse(require("fs").readFileSync(DRIVE_TOKEN_PATH))
+  );
+}
+async function uploadApkToDrive(filePath, fileName) {
+  const drive = google.drive({ version: "v3", auth: oAuth2Client });
+  const fileMetadata = { name: fileName };
+  const media = {
+    mimeType: "application/vnd.android.package-archive",
+    body: require("fs").createReadStream(filePath),
+  };
+  const file = await drive.files.create({
+    resource: fileMetadata,
+    media,
+    fields: "id,webContentLink",
+  });
+  return file.data.webContentLink;
+}
 const express = require("express");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
@@ -349,6 +379,14 @@ app.post("/api/download-apk", async (req, res) => {
     const userApkPath = path.join(APK_DIR, userApkName);
     await fs.copyFile(signedApkPath, userApkPath);
 
+    // Upload to Google Drive
+    let driveDownloadUrl = null;
+    try {
+      driveDownloadUrl = await uploadApkToDrive(userApkPath, userApkName);
+    } catch (err) {
+      console.error("Google Drive upload failed:", err);
+    }
+
     // Store metadata in Firebase
     const apkMeta = {
       apkId,
@@ -356,7 +394,7 @@ app.post("/api/download-apk", async (req, res) => {
       fileName: userApkName,
       created: Date.now(),
       expires: Date.now() + APK_EXPIRY_MS,
-      downloadUrl: `/api/download-user-apk/${apkId}`,
+      downloadUrl: driveDownloadUrl || `/api/download-user-apk/${apkId}`,
     };
     await db.ref(`apks/${userId}/${apkId}`).set(apkMeta);
 
