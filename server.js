@@ -1,4 +1,5 @@
 const express = require("express");
+const admin = require("firebase-admin");
 const crypto = require("crypto");
 const cors = require("cors");
 const path = require("path");
@@ -47,6 +48,16 @@ const cleanupTempDir = async (tempDirPath, delay = 1000) => {
 };
 
 const app = express();
+
+// Initialize Firebase Admin SDK
+const serviceAccount = require("./firebase-service-account.json");
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL:
+    process.env.FIREBASE_DATABASE_URL ||
+    "https://<your-project-id>.firebaseio.com",
+});
+const db = admin.database();
 // In-memory APK metadata store (use file/db for persistence in production)
 const apkStore = {};
 const APK_DIR = path.join(__dirname, "user_apks");
@@ -338,22 +349,19 @@ app.post("/api/download-apk", async (req, res) => {
     const userApkPath = path.join(APK_DIR, userApkName);
     await fs.copyFile(signedApkPath, userApkPath);
 
-    // Store metadata
-    apkStore[apkId] = {
+    // Store metadata in Firebase
+    const apkMeta = {
+      apkId,
       userId,
-      filePath: userApkPath,
+      fileName: userApkName,
       created: Date.now(),
       expires: Date.now() + APK_EXPIRY_MS,
-      fileName: userApkName,
+      downloadUrl: `/api/download-user-apk/${apkId}`,
     };
+    await db.ref(`apks/${userId}/${apkId}`).set(apkMeta);
 
     // Respond with APK info
-    res.json({
-      apkId,
-      fileName: userApkName,
-      expires: apkStore[apkId].expires,
-      downloadUrl: `/api/download-user-apk/${apkId}`,
-    });
+    res.json(apkMeta);
   } catch (error) {
     console.error("❌ APK modification error:", error);
     console.error("❌ Error stack:", error.stack);
@@ -395,17 +403,21 @@ app.post("/api/download-apk", async (req, res) => {
 
 // Health check endpoint
 // List user's APKs (for "Your APKs" table)
-app.get("/api/list-user-apks", (req, res) => {
+app.get("/api/list-user-apks", async (req, res) => {
   const userId = req.headers["x-user-id"] || "guest";
   const now = Date.now();
-  const userApks = Object.entries(apkStore)
-    .filter(([_, meta]) => meta.userId === userId && meta.expires > now)
-    .map(([apkId, meta]) => ({
-      apkId,
-      fileName: meta.fileName,
-      expires: meta.expires,
-    }));
-  res.json({ apks: userApks });
+  try {
+    const snapshot = await db.ref(`apks/${userId}`).once("value");
+    const apksObj = snapshot.val() || {};
+    const userApks = Object.values(apksObj).filter(
+      (meta) => meta.expires > now
+    );
+    res.json({ apks: userApks });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: "Failed to fetch APKs", details: err.message });
+  }
 });
 
 // Download user's APK
