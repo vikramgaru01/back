@@ -1,7 +1,7 @@
 // Google Drive integration
 const { google } = require("googleapis");
 const DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"];
-const DRIVE_CREDENTIALS = require("./credentials.json");
+const DRIVE_CREDENTIALS = require("/etc/secrets/credentials.json");
 const { client_secret, client_id, redirect_uris } = DRIVE_CREDENTIALS.installed;
 const oAuth2Client = new google.auth.OAuth2(
   client_id,
