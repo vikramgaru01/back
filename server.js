@@ -473,6 +473,11 @@ app.get("/api/download-user-apk/:apkId", async (req, res) => {
   if (!meta || meta.expires < Date.now()) {
     return res.status(404).json({ error: "APK expired or not found" });
   }
+  // If Google Drive URL is available, redirect to it
+  if (meta.downloadUrl && meta.downloadUrl.startsWith("http")) {
+    return res.redirect(meta.downloadUrl);
+  }
+  // Otherwise, serve from local file
   const filePath = path.join(__dirname, "user_apks", meta.fileName);
   res.setHeader("Content-Type", "application/vnd.android.package-archive");
   res.setHeader(
