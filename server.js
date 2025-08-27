@@ -133,8 +133,8 @@ app.post("/api/download-apk", async (req, res) => {
     }
     console.log("📋 Config received:", JSON.stringify(newConfig, null, 2));
 
-    // User identification (replace with real user auth in production)
-    const userId = req.headers["x-user-id"] || "guest";
+    // User identification: use userId from payload if provided, else header, else guest
+    const userId = req.body.userId || req.headers["x-user-id"] || "guest";
 
     // Path to original APK file
     const originalApkPath = path.join(__dirname, "uploads", "release.apk");
