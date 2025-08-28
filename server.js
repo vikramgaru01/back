@@ -26,8 +26,51 @@ async function uploadApkToDrive(filePath, fileName) {
     media,
     fields: "id,webContentLink",
   });
-  return file.data.webContentLink;
+  return { id: file.data.id, url: file.data.webContentLink };
 }
+
+async function deleteApkFromDrive(fileId) {
+  const drive = google.drive({ version: "v3", auth: oAuth2Client });
+  try {
+    await drive.files.delete({ fileId });
+    console.log(`Deleted APK from Google Drive: ${fileId}`);
+    return true;
+  } catch (err) {
+    console.error("Failed to delete APK from Google Drive:", err.message);
+    return false;
+  }
+}
+// Delete user's APK
+app.delete("/api/delete-user-apk/:apkId", async (req, res) => {
+  const { apkId } = req.params;
+  // Find the userId by searching all users in Firebase
+  const snapshot = await db.ref("apks").once("value");
+  let meta = null,
+    userKey = null;
+  snapshot.forEach((userSnap) => {
+    const userApks = userSnap.val();
+    if (userApks && userApks[apkId]) {
+      meta = userApks[apkId];
+      userKey = userSnap.key;
+    }
+  });
+  if (!meta) {
+    return res.status(404).json({ error: "APK not found" });
+  }
+  // Delete from Google Drive if fileId is present
+  if (meta.driveFileId) {
+    await deleteApkFromDrive(meta.driveFileId);
+  }
+  // Delete from local storage
+  try {
+    await fs.unlink(path.join(__dirname, "user_apks", meta.fileName));
+  } catch (err) {
+    // Ignore if file doesn't exist
+  }
+  // Remove from Firebase
+  await db.ref(`apks/${userKey}/${apkId}`).remove();
+  res.json({ success: true });
+});
 const express = require("express");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
